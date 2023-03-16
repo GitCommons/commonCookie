@@ -115,7 +115,7 @@ function initDB(profile) {
 }
 
 
-class cookieStore {
+class CookieStore {
   constructor(profile=null, key=null) {
     this.profile = handleProfile(profile)
     this.key = handleKey(key)
@@ -129,15 +129,7 @@ class cookieStore {
   }
 }
 
-!(()=>{
-  let store = new cookieStore()
-  let query = `SELECT name, encrypted_value, host_key FROM cookies WHERE host_key LIKE '.google.com' OR host_key LIKE 'console.cloud.google.com'`
-  let cookies = store.get(query)
-
-  let desiredKeys =  ['SID', 'HSID', 'SSID', 'OSID', 'SAPISID', 'APISID']
-  cookieObj = cookies
-    .filter(c=>desiredKeys.includes(c.name))
-    .reduce((a,c)=>({...a, [c.name]:c.value}), {})
-
-  console.log(cookieObj)
-})()
+module.exports = {
+  CookieStore,
+  initKey
+}

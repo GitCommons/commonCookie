@@ -1,7 +1,7 @@
 {
-  "name": "getcookies",
+  "name": "common-cookie",
   "version": "1.0.0",
-  "description": "simple local host to get http cookies in devtools. Never mind they are domain specific.",
+  "description": "A simple cookie scraper written in node.js",
   "main": "index.js",
   "scripts": {
     "start": "node .",
@@ -11,5 +11,10 @@
   "license": "ISC",
   "dependencies": {
     "better-sqlite3": "^8.2.0"
-  }
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/GitCommons/commonCookie.git"
+  },
+  "homepage": "https://github.com/GitCommons/commonCookie#readme"
 }
