@@ -22,12 +22,13 @@ Linux:
 */
 
 const crypto = require('crypto');
-const sqlite3 = require('sqlite3').verbose();
+const Database = require('better-sqlite3')
+
 const { execSync } = require('child_process')
 
-
-let db = null
-let macKey = null
+const fs = require("fs")
+const { homedir } = require("os")
+const { join } = require("path")
 
 
 function decrypt(encryptedData, key) {
@@ -50,76 +51,6 @@ function decrypt(encryptedData, key) {
   return decryptedValue.slice(0, decryptedValue.length - decryptedValue[decryptedValue.length - 1] ).toString('utf8')
 }
 
-
-async function getCookies(query) {
-  return new Promise((resolve , reject) => {
-    db.all(query, (err, rows) => {
-      if (err) {
-        console.error(err)
-        reject(err)
-      }
-
-      // get key
-      if (!macKey) {
-        let tmp = execSync('security find-generic-password -wa "Chrome"').toString()
-        if (tmp) {
-          macKey = tmp.trimEnd('\n')
-        } else {
-          macKey = 'mock_password'
-        }
-      }
-      let derivedKey = crypto.pbkdf2Sync(macKey, 'saltysalt', 1003, 16, 'sha1')
-
-      // Iterate over the query results and decrypt each cookie value
-      let decryptedCookieArr = rows.map( r =>({...r, value: decrypt(r.encrypted_value, derivedKey) }) )
-
-      resolve( decryptedCookieArr )
-    })
-  })
-}
-
-
-!(()=>{
-  // Init cookie DB
-  const fs = require("fs");
-  const {homedir} = require("os");
-  const {join} = require("path")
-
-  //you can get the current profile from 'Local State', a json file located in '/Users/{username}/Library/Application Support/Google/Chrome/'
-  const localStatePath = join(homedir(), `/Library/Application Support/Google/Chrome/Local State`)
-  const jsonString = fs.readFileSync(localStatePath)
-  const localState = JSON.parse(jsonString)
-
-  let profile = localState?.profile?.last_used || 'Default'
-  let cookieDBPath = join(homedir(), `/Library/Application Support/Google/Chrome/${profile}/Cookies`)
-
-  db = new sqlite3.Database(cookieDBPath);
-})()
-
-
-!(async ()=>{
-  // Execute a SQL query to extract the encrypted cookie values
-  let query = `SELECT name, encrypted_value, host_key FROM cookies WHERE host_key LIKE ".google.com" OR  host_key LIKE "console.cloud.google.com"`
-  let cookiesArr = await getCookies(query)
-
-  let desiredKeys =  ['SID', 'HSID', 'SSID', 'OSID', 'SAPISID', 'APISID']
-
-  cookiesObj = cookiesArr
-    .filter(c=>desiredKeys.includes(c.name))
-    .reduce((a,c)=>({...a, [c.name]:c.value}), {})
-
-  console.log(cookiesObj)
-})//()
-
-
-
-/////////////////
-
-
-
-const fs = require("fs")
-const {homedir} = require("os")
-const {join} = require("path")
 
 function getActiveProfile() {
   //you can get the current profile from 'Local State', a json file located in '/Users/{username}/Library/Application Support/Google/Chrome/'
@@ -144,31 +75,17 @@ function handleProfile(p) {
 
 let globalKey = null
 function initKey() {
-  if (!macKey) {
-    let tmp = execSync('security find-generic-password -wa "Chrome"').toString()
-    if (tmp) {
-      macKey = tmp.trimEnd('\n')
-    } else {
-      macKey = 'mock_password'
-    }
+  let tmp = execSync('security find-generic-password -wa "Chrome"').toString()
+  if (tmp) {
+    tmp = tmp.trimEnd('\n')
+  } else {
+    tmp = 'mock_password'
   }
-  let globalKey = crypto.pbkdf2Sync(macKey, 'saltysalt', 1003, 16, 'sha1')
+
+  globalKey = crypto.pbkdf2Sync(tmp, 'saltysalt', 1003, 16, 'sha1')
   return globalKey
 }
 
-/* function handleKey(k) {
-  // if nothing set, init global
-  if (k === null && globalKey === null) return initKey()
-
-  // no param given, default to global
-  if (k === null && Buffer.isBuffer(globalKey)) return globalKey
-
-  // If buffer i'm assuming its correct
-  if (Buffer.isBuffer(k)) return k
-
-  // Error
-  throw new Error(`Failed to resolve key given:\n• key: ${typeof k}\n• globalKey: ${typeof globalKey}`)
-} */
 
 function handleKey(k) {
   if (k === null) {
@@ -189,11 +106,14 @@ function handleKey(k) {
   throw new Error(`Failed to validate key argument for key of type ${typeof k}`)
 }
 
+
 function initDB(profile) {
   let cookieDBPath = join(homedir(), `/Library/Application Support/Google/Chrome/${profile}/Cookies`)
-  let db = new sqlite3.Database(cookieDBPath);
+  let db = new Database(cookieDBPath, {readonly: true, fileMustExist: true});
+  db.pragma('journal_mode = WAL');
   return db
 }
+
 
 class cookieStore {
   constructor(profile=null, key=null) {
@@ -202,27 +122,17 @@ class cookieStore {
     this.db = initDB(this.profile)
   }
 
-  async get(query) {
-    return new Promise((resolve , reject) => {
-      this.db.all(query, (err, rows) => {
-        if (err) {
-          console.error(err)
-          reject(err)
-        }
-
-        // Iterate over the query results and decrypt each cookie value
-        let decryptedCookieArr = rows.map( r =>({...r, value: decrypt(r.encrypted_value, this.key) }) )
-
-        resolve( decryptedCookieArr )
-      })
-    })
+  get(query) {
+    const rows = this.db.prepare(query).all();
+    let decryptedCookieArr = rows.map( r =>({...r, value: decrypt(r.encrypted_value, this.key) }) )
+    return decryptedCookieArr
   }
 }
 
-!(async ()=>{
+!(()=>{
   let store = new cookieStore()
-  let query = `SELECT name, encrypted_value, host_key FROM cookies WHERE host_key LIKE ".google.com" OR  host_key LIKE "console.cloud.google.com"`
-  let cookies = await store.get(query)
+  let query = `SELECT name, encrypted_value, host_key FROM cookies WHERE host_key LIKE '.google.com' OR host_key LIKE 'console.cloud.google.com'`
+  let cookies = store.get(query)
 
   let desiredKeys =  ['SID', 'HSID', 'SSID', 'OSID', 'SAPISID', 'APISID']
   cookieObj = cookies
